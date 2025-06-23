@@ -1,8 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 import TodoItem from './TodoItem';
 
 interface Todo {
@@ -14,29 +16,146 @@ interface Todo {
 const TodoList: React.FC = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [inputValue, setInputValue] = useState('');
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
 
-  const addTodo = () => {
-    if (inputValue.trim() !== '') {
-      const newTodo: Todo = {
-        id: Date.now().toString(),
-        text: inputValue.trim(),
-        completed: false,
-      };
-      setTodos(prev => [...prev, newTodo]);
-      setInputValue('');
+  // Load todos from Supabase on component mount
+  useEffect(() => {
+    loadTodos();
+  }, []);
+
+  const loadTodos = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('todos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        toast({
+          title: "Error loading todos",
+          description: error.message,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setTodos(data || []);
+    } catch (error) {
+      console.error('Error loading todos:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load todos",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const toggleTodo = (id: string) => {
-    setTodos(prev =>
-      prev.map(todo =>
-        todo.id === id ? { ...todo, completed: !todo.completed } : todo
-      )
-    );
+  const addTodo = async () => {
+    if (inputValue.trim() !== '') {
+      try {
+        const { data, error } = await supabase
+          .from('todos')
+          .insert([
+            {
+              text: inputValue.trim(),
+              completed: false,
+            }
+          ])
+          .select()
+          .single();
+
+        if (error) {
+          toast({
+            title: "Error adding todo",
+            description: error.message,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        setTodos(prev => [data, ...prev]);
+        setInputValue('');
+        toast({
+          title: "Success",
+          description: "Todo added successfully",
+        });
+      } catch (error) {
+        console.error('Error adding todo:', error);
+        toast({
+          title: "Error",
+          description: "Failed to add todo",
+          variant: "destructive",
+        });
+      }
+    }
   };
 
-  const deleteTodo = (id: string) => {
-    setTodos(prev => prev.filter(todo => todo.id !== id));
+  const toggleTodo = async (id: string) => {
+    const todo = todos.find(t => t.id === id);
+    if (!todo) return;
+
+    try {
+      const { error } = await supabase
+        .from('todos')
+        .update({ completed: !todo.completed })
+        .eq('id', id);
+
+      if (error) {
+        toast({
+          title: "Error updating todo",
+          description: error.message,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setTodos(prev =>
+        prev.map(todo =>
+          todo.id === id ? { ...todo, completed: !todo.completed } : todo
+        )
+      );
+    } catch (error) {
+      console.error('Error updating todo:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update todo",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const deleteTodo = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('todos')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        toast({
+          title: "Error deleting todo",
+          description: error.message,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setTodos(prev => prev.filter(todo => todo.id !== id));
+      toast({
+        title: "Success",
+        description: "Todo deleted successfully",
+      });
+    } catch (error) {
+      console.error('Error deleting todo:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete todo",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -47,6 +166,16 @@ const TodoList: React.FC = () => {
 
   const completedCount = todos.filter(todo => todo.completed).length;
   const totalCount = todos.length;
+
+  if (loading) {
+    return (
+      <div className="w-full max-w-2xl mx-auto">
+        <div className="text-center">
+          <div className="text-white text-lg">Loading todos...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-2xl mx-auto">
